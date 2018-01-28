@@ -1,0 +1,158 @@
+%{
+#define IN_BURM
+
+#include <stdlib.h>
+#include <stdio.h>
+#include <assert.h>
+
+#include "debug.h"
+#include "tools.h"
+#include "tree.h"
+#include "reg.h"
+
+#define NODEPTR_TYPE treep
+#define OP_LABEL(p)	((int)((p)->op))
+#define LEFT_CHILD(p)	((p)->nodes[0])
+#define RIGHT_CHILD(p)	((p)->nodes[1])
+#define STATE_LABEL(p)	((p)->state)
+#define PANIC		printf
+
+
+%}
+%start reg
+
+%term NT_VAR=1 NT_CONST=2 NT_CONST_0=3 NT_CONST_1=4 NT_CONST_SF=5
+
+%term NT_FCALL=6 NT_FPARAM_START=7 NT_FPARAM_REG=8
+
+%term NT_NOT=9 NT_MINUS=10 NT_READ=11 
+
+%term NT_PLUS=12 NT_MUL=13 NT_AND=14 NT_EQLESS=15 NT_UNEQ=16
+
+%term NT_WADDRES=17 NT_WIDENT=18
+
+%%
+reg: NT_VAR			#0# bnode->reg=reg_link_var(regs, bnode->name);
+con: NT_CONST			#0# 
+con: NT_CONST_0			#0# 
+con: NT_CONST_1			#0# 
+con: NT_CONST_SF		#0# 
+tot: NT_VAR			#0#
+tot: con			#0#
+reg: con 			#1# bnode->reg=reg_link_const(regs, bnode->val);
+reg: c_0			#1# bnode->reg=reg_link_const(regs, bnode->val);
+reg: c_1			#1# bnode->reg=reg_link_const(regs, bnode->val);
+reg: csf			#1# bnode->reg=reg_link_const(regs, bnode->val);
+c_0: NT_CONST_0			#0# 
+c_1: NT_CONST_1			#0#
+csf: NT_CONST_SF		#0# 
+csf: NT_CONST_1			#0#  
+
+con: NT_NOT(con)		#0# bnode->val=~kids[0]->val;
+reg: NT_NOT(reg)		#2# bnode->reg=reg_manage(regs,&kids[0]->reg,NULL,REGM_ONE); printf("\tnotq %s\n",reg_getname(regs,kids[0]->reg)); 
+tot: NT_NOT(tot)		#0#
+c_0: NT_NOT(NT_NOT(c_0))	#0# bnode->val=kids[0]->val;
+c_1: NT_NOT(NT_NOT(c_1))	#0# bnode->val=kids[0]->val;
+csf: NT_NOT(NT_NOT(csf))	#0# bnode->val=kids[0]->val;
+reg: NT_NOT(NT_NOT(reg))	#0# bnode->reg=kids[0]->reg;
+
+con: NT_MINUS(con)		#0# bnode->val=0-kids[0]->val;
+reg: NT_MINUS(reg)		#2# bnode->reg=reg_manage(regs,&kids[0]->reg,NULL,REGM_ONE); printf("\tnegq %s\n",reg_getname(regs,kids[0]->reg)); 
+tot: NT_MINUS(tot)		#0# 
+c_0: NT_MINUS(c_0)		#0# bnode->val=0-kids[0]->val;
+c_1: NT_MINUS(NT_MINUS(c_1))	#0# bnode->val=kids[0]->val;
+csf: NT_MINUS(NT_MINUS(csf))	#0# bnode->val=kids[0]->val;
+reg: NT_MINUS(NT_MINUS(reg))	#0# bnode->reg=kids[0]->reg; 
+
+con: NT_EQLESS(con,con)		#0# bnode->val=(kids[0]->val<=kids[1]->val);
+reg: NT_EQLESS(reg,reg)		#4# bnode->reg=reg_manage(regs,&kids[1]->reg,&kids[0]->reg,REGM_EXCHANGE); printf("\tcmpq %s, %s \n\tmovq $0, %s\n\tset%s %s\n",reg_getname(regs,kids[0]->reg),reg_getname(regs,kids[1]->reg),reg_getname(regs,kids[1]->reg), reg_last_exchange(regs)?"le":"ge",reg_getname_8bit(regs,kids[1]->reg));
+tot: NT_EQLESS(tot,tot)		#0# 
+c_1: NT_EQLESS(c_0,c_0)		#0# bnode->val=(kids[0]->val<=kids[1]->val);
+c_1: NT_EQLESS(c_1,c_1)		#0# bnode->val=(kids[0]->val<=kids[1]->val);
+c_1: NT_EQLESS(c_0,c_1)		#0# bnode->val=(kids[0]->val<=kids[1]->val);
+c_1: NT_EQLESS(c_0,csf)		#0# bnode->val=(kids[0]->val<=kids[1]->val);
+c_0: NT_EQLESS(c_1,c_0)		#0# bnode->val=(kids[0]->val<=kids[1]->val);
+c_0: NT_EQLESS(csf,c_0)		#0# bnode->val=(kids[0]->val<=kids[1]->val);
+
+con: NT_UNEQ(con,con)		#0# bnode->val=(kids[0]->val!=kids[1]->val);
+reg: NT_UNEQ(reg,reg)		#4# bnode->reg=reg_manage(regs,&kids[1]->reg,&kids[0]->reg,REGM_EXCHANGE); printf("\tcmpq %s, %s\n\tmovq $0, %s\n\tsetne %s\n",reg_getname(regs,kids[0]->reg),reg_getname(regs,kids[1]->reg),reg_getname(regs,kids[1]->reg),reg_getname_8bit(regs,kids[1]->reg));
+tot: NT_UNEQ(tot,tot)		#0# 
+c_1: NT_UNEQ(c_0,c_1)		#0# bnode->val=(kids[0]->val!=kids[1]->val);
+c_1: NT_UNEQ(c_1,c_0)		#0# bnode->val=(kids[0]->val!=kids[1]->val);
+c_1: NT_UNEQ(c_0,csf)		#0# bnode->val=(kids[0]->val!=kids[1]->val);
+c_1: NT_UNEQ(csf,c_0)		#0# bnode->val=(kids[0]->val!=kids[1]->val);
+c_0: NT_UNEQ(c_1,c_1)		#0# bnode->val=(kids[0]->val!=kids[1]->val);
+c_0: NT_UNEQ(c_0,c_0)		#0# bnode->val=(kids[0]->val!=kids[1]->val);
+
+con: NT_PLUS(con,con)		#0# bnode->val=kids[0]->val+kids[1]->val;
+reg: NT_PLUS(reg,reg)		#1# bnode->reg=reg_manage(regs,&kids[1]->reg,&kids[0]->reg,REGM_EXCHANGE); printf("\taddq %s, %s\n",reg_getname(regs,kids[0]->reg),reg_getname(regs,kids[1]->reg)); 
+tot: NT_PLUS(tot,tot)		#0#
+c_0: NT_PLUS(c_0,c_0)		#0# bnode->val=kids[0]->val+kids[1]->val;
+c_1: NT_PLUS(c_0,c_1)		#0# bnode->val=kids[0]->val+kids[1]->val;
+c_1: NT_PLUS(c_1,c_0)		#0# bnode->val=kids[0]->val+kids[1]->val;
+csf: NT_PLUS(c_0,csf)		#0# bnode->val=kids[0]->val+kids[1]->val;
+csf: NT_PLUS(csf,c_0)		#0# bnode->val=kids[0]->val+kids[1]->val;
+reg: NT_PLUS(reg,c_0)		#0# bnode->reg=kids[0]->reg;
+reg: NT_PLUS(c_0,reg)		#0# bnode->reg=kids[1]->reg;
+rcp: reg			#0# bnode->val=0;
+rcp: NT_PLUS(rcp,con)		#0# bnode->reg=kids[0]->reg; bnode->val=kids[0]->val+kids[1]->val; 
+rcp: NT_PLUS(con,rcp)		#0# bnode->reg=kids[1]->reg; bnode->val=kids[0]->val+kids[1]->val; 
+reg: rcp			#2# bnode->reg=reg_manage(regs,&bnode->reg,NULL,REGM_ONE); printf("\taddq $%ld, %s\n",bnode->val,reg_getname(regs,bnode->reg));
+reg: NT_PLUS(rcp,rcp)		#2# bnode->reg=reg_manage(regs,&kids[1]->reg,&kids[0]->reg,REGM_ONLY); printf("\tleaq %ld(%s,%s), %s\n",kids[0]->val+kids[1]->val,reg_getname(regs,kids[0]->reg),reg_getname(regs,kids[1]->reg),reg_getname(regs,kids[1]->reg));
+reg: NT_PLUS(NT_MINUS(reg),reg)	#2# bnode->reg=reg_manage(regs,&kids[1]->reg,&kids[0]->reg,REGM_FIXED); printf("\tsubq %s, %s\n",reg_getname(regs,kids[0]->reg),reg_getname(regs,kids[1]->reg)); 
+reg: NT_PLUS(reg,NT_MINUS(reg))	#2# bnode->reg=reg_manage(regs,&kids[0]->reg,&kids[1]->reg,REGM_FIXED); printf("\tsubq %s, %s\n",reg_getname(regs,kids[1]->reg),reg_getname(regs,kids[0]->reg));
+reg: NT_PLUS(NT_MINUS(reg),NT_MINUS(reg)) #3# bnode->reg=reg_manage(regs,&kids[1]->reg,&kids[0]->reg,REGM_EXCHANGE); printf("\taddq %s, %s\n",reg_getname(regs,kids[0]->reg),reg_getname(regs,kids[1]->reg)); printf("\tnegq %s\n",reg_getname(regs,kids[1]->reg));
+
+con: NT_MUL(con,con)		#0# bnode->val=kids[0]->val*kids[1]->val;
+reg: NT_MUL(reg,reg)		#2# bnode->reg=reg_manage(regs,&kids[1]->reg,&kids[0]->reg,REGM_EXCHANGE); printf("\timulq %s, %s\n",reg_getname(regs,kids[0]->reg),reg_getname(regs,kids[1]->reg));
+tot: NT_MUL(tot,tot)		#0# 
+c_0: NT_MUL(c_0,tot)		#0# bnode->val=0;
+c_0: NT_MUL(tot,c_0)		#0# bnode->val=0;
+c_1: NT_MUL(c_1,c_1)		#0# bnode->val=kids[0]->val*kids[1]->val;
+csf: NT_MUL(csf,c_1)		#0# bnode->val=kids[0]->val*kids[1]->val;
+csf: NT_MUL(c_1,csf)		#0# bnode->val=kids[0]->val*kids[1]->val;
+rcm: reg			#0# bnode->val=1;
+rcm: NT_MUL(rcm,con)		#0# bnode->reg=kids[0]->reg; bnode->val=kids[0]->val*kids[1]->val; 
+rcm: NT_MUL(con,rcm)		#0# bnode->reg=kids[1]->reg; bnode->val=kids[0]->val*kids[1]->val; 
+reg: NT_MUL(reg,c_1)		#0# bnode->reg=kids[0]->reg; 
+reg: NT_MUL(c_1,reg)		#0# bnode->reg=kids[1]->reg; 
+reg: rcm			#2# bnode->reg=reg_manage(regs,&bnode->reg,NULL,REGM_ONE); printf("\timulq $%ld, %s\n",bnode->val,reg_getname(regs,bnode->reg));
+reg: NT_MUL(rcm,rcm)		#3# bnode->reg=reg_manage(regs,&kids[1]->reg,&kids[0]->reg,REGM_EXCHANGE); printf("\timulq %s, %s\n",reg_getname(regs,kids[0]->reg),reg_getname(regs,kids[1]->reg)); printf("\timulq $%ld, %s\n",kids[0]->val*kids[1]->val,reg_getname(regs,kids[1]->reg));
+
+con: NT_AND(con,con)		#0# bnode->val=kids[0]->val&kids[1]->val;
+reg: NT_AND(reg,reg)		#2# bnode->reg=reg_manage(regs,&kids[1]->reg,&kids[0]->reg,REGM_EXCHANGE); printf("\tandq %s, %s\n",reg_getname(regs,kids[0]->reg),reg_getname(regs,kids[1]->reg)); 
+tot: NT_AND(tot,tot)		#0# 
+c_0: NT_AND(c_0,tot)		#0# bnode->val=0; 
+c_0: NT_AND(tot,c_0)		#0# bnode->val=0;
+c_1: NT_AND(c_1,c_1)		#0# bnode->val=kids[0]->val&kids[1]->val;
+rca: reg			#0# bnode->val=~(long)0; 
+rca: NT_AND(rca,con)		#0# bnode->reg=kids[0]->reg; bnode->val=kids[0]->val&kids[1]->val; 
+rca: NT_AND(con,rca)		#0# bnode->reg=kids[1]->reg; bnode->val=kids[0]->val&kids[1]->val; 
+reg: rca			#2# bnode->reg=reg_manage(regs,&bnode->reg,NULL,REGM_ONE); printf("\tandq $%ld, %s\n",bnode->val,reg_getname(regs,bnode->reg));
+reg: NT_AND(rca,rca)		#3# bnode->reg=reg_manage(regs,&kids[1]->reg,&kids[0]->reg,REGM_EXCHANGE); printf("\tandq %s, %s\n",reg_getname(regs,kids[0]->reg),reg_getname(regs,kids[1]->reg)); printf("\tandq $%ld, %s\n",kids[0]->val&kids[1]->val,reg_getname(regs,kids[1]->reg));
+reg: NT_AND(NT_NOT(reg),NT_NOT(reg))#2# bnode->reg=reg_manage(regs,&kids[1]->reg,&kids[0]->reg,REGM_EXCHANGE); printf("\torq %s, %s\n",reg_getname(regs,kids[0]->reg),reg_getname(regs,kids[1]->reg)); printf("\tnotq %s\n",reg_getname(regs,kids[1]->reg));
+reg: NT_NOT(NT_AND(NT_NOT(reg),NT_NOT(reg)))#2# bnode->reg=reg_manage(regs,&kids[1]->reg,&kids[0]->reg,REGM_EXCHANGE); printf("\torq %s, %s\n",reg_getname(regs,kids[0]->reg),reg_getname(regs,kids[1]->reg));
+
+tot: NT_READ(tot)		#0#
+rsfd: reg			#0# bnode->rsf=bnode->reg; bnode->val=0; bnode->sf=1; 
+rsfd: rcp			#0# bnode->rsf=bnode->reg; bnode->sf=1;
+rsfd: NT_MUL(reg,csf)		#0# bnode->rsf=kids[0]->reg; bnode->sf=kids[1]->val; bnode->val=0; 
+rsfd: NT_MUL(csf,reg)		#0# bnode->sf=kids[0]->val; bnode->rsf=kids[1]->reg; bnode->val=0;
+rsfd: NT_PLUS(con,rsfd)		#0# bnode->val=kids[0]->val + kids[1]->val; bnode->sf=kids[1]->sf; bnode->rsf=kids[1]->rsf;
+rsfd: NT_PLUS(rsfd,con)		#0# bnode->sf=kids[0]->sf; bnode->rsf=kids[0]->rsf; bnode->val=kids[0]->val+kids[1]->val;
+rrsfd: NT_PLUS(rsfd,rcp)	#0# bnode->reg=kids[1]->reg; bnode->rsf=kids[0]->rsf; bnode->sf=kids[0]->sf; bnode->val=kids[0]->val+kids[1]->val;
+rrsfd: NT_PLUS(rcp,rsfd)	#0# bnode->reg=kids[0]->reg; bnode->rsf=kids[1]->rsf; bnode->sf=kids[1]->sf; bnode->val=kids[0]->val+kids[1]->val;
+rrsfd: NT_PLUS(con,rrsfd)	#0# bnode->reg=kids[1]->reg; bnode->rsf=kids[1]->rsf; bnode->sf=kids[1]->sf; bnode->val=kids[0]->val+kids[1]->val;
+rrsfd: NT_PLUS(rrsfd,con)	#0# bnode->reg=kids[0]->reg; bnode->rsf=kids[0]->rsf; bnode->sf=kids[0]->sf; bnode->val=kids[0]->val+kids[1]->val;
+reg: rsfd 			#2# bnode->reg=reg_manage(regs,&bnode->rsf,NULL,REGM_ONE); printf("\tleaq %ld(,%s,%d), %s\n",bnode->val,reg_getname(regs,bnode->rsf),bnode->sf,reg_getname(regs,bnode->rsf));
+reg: rrsfd 			#2# bnode->reg=reg_manage(regs,&bnode->reg,&bnode->rsf,REGM_ONLY); printf("\tleaq %ld(%s,%s,%d), %s\n",bnode->val,reg_getname(regs,bnode->reg),reg_getname(regs,bnode->rsf),bnode->sf,reg_getname(regs,bnode->reg));
+reg: NT_READ(rsfd)		#2# bnode->reg=reg_manage(regs,&kids[0]->rsf,NULL,REGM_ONE); printf("\tmovq %ld(,%s,%d), %s\n",kids[0]->val,reg_getname(regs,kids[0]->rsf),kids[0]->sf,reg_getname(regs,kids[0]->rsf));
+reg: NT_READ(rrsfd)		#2# bnode->reg=reg_manage(regs,&kids[0]->rsf,&kids[0]->reg,REGM_ONLY); printf("\tmovq %ld(%s,%s,%d), %s\n",kids[0]->val,reg_getname(regs,kids[0]->reg),reg_getname(regs,kids[0]->rsf),kids[0]->sf,reg_getname(regs,kids[0]->rsf));
+reg: NT_WIDENT(reg)		#2# bnode->rsf=reg_link_var(regs,bnode->name); bnode->reg=reg_manage(regs,&kids[0]->reg,&bnode->rsf,REGM_FIXED); printf("\tmovq %s, %s\n",reg_getname(regs,kids[0]->reg),reg_getname(regs,bnode->rsf)); 
+reg: NT_WADDRES(rsfd,reg)	#2# bnode->reg=reg_manage(regs,&kids[1]->reg,&kids[0]->rsf,REGM_ONLY); printf("\tmovq %s, %ld(,%s,%d)\n",reg_getname(regs,kids[1]->reg),kids[0]->val,reg_getname(regs,kids[0]->rsf),kids[0]->sf);
+
+reg: NT_FCALL(fnc)		#0# bnode->reg=reg_call_do(regs,kids[0]->fcall,bnode->val,bnode->name);
+fnc: NT_FPARAM_REG(fnc,reg)	#0# bnode->fcall=reg_call_push(regs, kids[0]->fcall, bnode->val, kids[1]->reg);
+fnc: NT_FPARAM_START		#0# bnode->fcall=reg_call_new(regs);
+
+%%
